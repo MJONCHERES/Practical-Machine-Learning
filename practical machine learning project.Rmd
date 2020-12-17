@@ -1,0 +1,125 @@
+---
+title: "Practical Machine Learning Project"
+author: "Marion Joncheres"
+output: html_document
+---
+
+## Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit, it is now possible to collect a large amount of data about personal activity relatively inexpensively. These devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly. That people regularly quantify how much of a particular activity they do, but they rarely quantify how well they do it. More information is available here: <http://groupware.les.inf.puc-rio.br/har>.
+We will use the datafrom accelerometers placed on differents body parts of 6 participants who perform barbell lifts. They can do it correctly and incorrectly, in 5 different ways (the "classe" variable): according to specifications ("A"), throwing the elbows to the front ("B"), lifting dumbbell only halfway ("C"), lowering dumbbell only halfway ("D"), throwing hips to the front ("E"). Our goal is to build a prediction model to predict the "classe" for 20 different test cases.
+
+## Data pre-processing and cleaning
+
+Load required packages
+
+```{r}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(knitr)
+```
+
+Load and read data
+
+```{r}
+dataset_url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+download.file(dataset_url, "pml-training.csv")
+training = read.csv("pml-training.csv")
+dataset_url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(dataset_url, "pml-testing.csv")
+testing = read.csv("pml-testing.csv")
+dim(training); dim(testing)
+```
+
+Split training set between subtraining and subtesting sets, to keep the testing data for quiz prediction
+
+```{r}
+set.seed(3598) # For reproducibile purpose
+inTrain <- createDataPartition(training$classe, p=0.6, list=FALSE)
+subtraining <- training[inTrain, ]
+subtesting <- training[-inTrain, ]
+```
+
+Datasets have 160 columns. We can remove some of them, based on unuseful identification columns (5 first ones), columns with to many N/A values (eg > 80%) and Near Zero Variance variables.
+
+```{r}
+# remove first 5 columns of subtraining (which only contains figures similar to index)
+subtraining <- subtraining[, -c(1:5)]
+# remove columns with more than 80% of N/A values
+NAvalues <- sapply(subtraining, function(x) mean(is.na(x))) > 0.80
+subtraining <- subtraining[, NAvalues==FALSE]
+# remove Near Zero Variance variables
+NZV <- nearZeroVar(subtraining)
+subtraining <- subtraining[, -NZV]
+dim(subtraining)
+```
+
+We are down to 54 columns in the training set. We need to replicate this cleaning to subtesting and testing sets, so we just subset and keep the same columns than in the subtraining set.
+
+```{r}
+colsubtraining <- colnames(subtraining)
+subclasse <- colnames(subtraining[, -54])  # remove the classe column (which is the last one)
+subtesting <- subtesting[colsubtraining]         # only keep variables in subtesting that are in subtraining
+testing <- testing[subclasse]             # only keep variables in testing that are in subtraining less "classe"
+subtesting$classe<- as.factor(subtesting$classe)  # classe variable should be a factor variable
+subtraining$classe<- as.factor(subtraining$classe)   # classe variable should be a factor variable
+```
+
+We can check the number of columns in these two datasets:
+
+```{r}
+dim(subtesting)
+dim(testing)
+```
+
+We are now ready to build the model.
+
+## Prediction Model
+
+We'll use different algorythme to find out which one is the most efficient based on accuracy level. 
+We started with random forest, one of the most well-known and efficient. However, it seems that we have not enough computing power and it took ages to run, illustrating what was said during the course.So we tried with the decision tree instead.
+
+1. Decision tree
+
+```{r}
+mod_dt <- rpart(classe ~ ., data=subtraining, method="class")
+rpart.plot(mod_dt)
+```
+
+```{r}
+predict_dt <- predict(mod_dt, newdata=subtesting, type = "class")
+cm_dt <- confusionMatrix(predict_dt, subtesting$classe)
+cm_dt
+```
+
+2. Global Boosted Regression Models (GBM)
+
+```{r}
+mod_gbm <- train(classe ~ ., data = subtraining, method = "gbm", verbose="FALSE")
+predictGBM <- predict(mod_gbm, newdata=subtesting)
+cmGBM <- confusionMatrix(predictGBM, subtesting$classe)
+cmGBM
+```
+
+3. Linear Discriminant analysis (LDA)
+
+```{r}
+mod_lda <- train(classe ~ ., data = subtraining, method = "lda")
+predictLDA <- predict(mod_lda, newdata=subtesting)
+cmLDA <- confusionMatrix(predictLDA, subtesting$classe)
+cmLDA
+```
+
+ 
+
+## Predictions for the quiz
+
+The GBM model has the best accuracy by far. The expected out of sample error stands around 1%. We'll use it to answer the quiz questions.
+
+```{r}
+quiz <- predict(mod_gbm, newdata=testing)
+quiz
+```
+
